@@ -85,6 +85,27 @@ AgarBackend.prototype.setClient = function setClient(client, shouldPassMessages)
   this.client.on('close', this.onClientClose);
 };
 
+
+function AgarSocket() {
+  _.bindAll(this);
+  events.EventEmitter.call(this);
+}
+util.inherits(AgarSocket, events.EventEmitter);
+
+
+AgarSocket.prototype.connect = function (ip, code, id) {
+    var url = 'ws://' + ip + '/';
+    this.id = id;
+    this.code = code;
+    this.socket = new WebSocket(url, {origin: 'http://agar.io'});
+    this.socket.on('open', this.onSocketOpen);
+    this.socket.on('message', this.onSocketMessage);
+    this.socket.on('close', this.onSocketClose);
+    this.socket.on('error', function (error) {
+      console.log("error", error);
+    });
+}
+
 /**
  * connect
  *
@@ -94,9 +115,9 @@ AgarBackend.prototype.setClient = function setClient(client, shouldPassMessages)
  * @return {undefined}
  */
 AgarBackend.prototype.connect = function connect() {
-  if (!this.client) {
-    throw new Error('Set client before connecting backend');
-  }
+  //if (!this.client) {
+    //throw new Error('Set client before connecting backend');
+  //}
 
   var self = this;
   this.getServerIP(function(error, ip) {
@@ -105,18 +126,13 @@ AgarBackend.prototype.connect = function connect() {
       // upstream can handle the error. But for right now... ¯\_(ツ)_/¯
       throw error;
     }
+    for (var i = 0; i < 10; i++) {
+      var ips = ip.split('\n');
+      console.log("salut", ips);
+      var socket = new AgarSocket()
+      socket.connect(ips[0], ips[1], i);
+    }
 
-    var ips = ip.split('\n');
-    console.log("salut", ips);
-    var url = 'ws://' + ips[0] + '/';
-    self.code = ips[1];
-    self.socket = new WebSocket(url, {origin: 'http://agar.io'});
-    self.socket.on('open', self.onSocketOpen);
-    self.socket.on('message', self.onSocketMessage);
-    self.socket.on('close', self.onSocketClose);
-    self.socket.on('error', function (error) {
-      console.log("error", error);
-    });
   });
 };
 
@@ -259,6 +275,75 @@ AgarBackend.prototype.onSocketMessage = function onSocketMessage(data) {
  */
 AgarBackend.prototype.onSocketClose = function onSocketClose() {
   console.log("socket closed");
+  if (this.client) {
+    this.client.close();
+  }
+};
+
+/**
+ * onSocketOpen
+ *
+ * @return {undefined}
+ */
+AgarSocket.prototype.onSocketOpen = function onSocketOpen() {
+  console.log("socket open");
+
+  var a;
+  ba = 500;
+  a = K(5);
+  a.setUint8(0, 254);
+  a.setUint32(1, 4, !0);
+  L(this.socket, a);
+  a = K(5);
+  a.setUint8(0, 255);
+  a.setUint32(1, 673720361, !0);
+  L(this.socket, a);
+  a = K(1 + this.code.length);
+  a.setUint8(0, 80);
+  for (var c = 0; c < this.code.length; ++c)
+      a.setUint8(c + 1, this.code.charCodeAt(c));
+  L(this.socket, a);
+  //Ia()
+
+
+  while (this.initialIncomingBuffer && this.initialIncomingBuffer.length) {
+    this.socket.send(this.initialIncomingBuffer.pop());
+  }
+};
+
+/**
+ * onSocketMessage
+ *
+ * @param data
+ * @return {undefined}
+ */
+AgarSocket.prototype.onSocketMessage = function onSocketMessage(data) {
+  console.log("server msg", this.id);
+  if (this.client && this.client.readyState === WebSocket.OPEN) {
+    this.client.send(data);
+  }
+
+  var message = parser.parse(data);
+  if (message.type === parser.TYPES.USER_ID) {
+    this.emit('userId', message.data.id);
+  } else if (message.type === parser.TYPES.UPDATES) {
+    this.emit('updates', message.data.consumptions, message.data.entities, message.data.destructions);
+  } else if (message.type === parser.TYPES.BOARD_SIZE) {
+    this.emit('boardSize', message.data.maxX, message.data.maxY);
+  } else if (message.type === parser.TYPES.LEADER_BOARD) {
+  } else {
+    console.log('unknown message');
+    console.log(JSON.stringify(message, null, 2));
+  }
+};
+
+/**
+ * onSocketClose
+ *
+ * @return {undefined}
+ */
+AgarSocket.prototype.onSocketClose = function onSocketClose() {
+  console.log("socket closed", this.id);
   if (this.client) {
     this.client.close();
   }

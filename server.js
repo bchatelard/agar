@@ -22,26 +22,31 @@ var app = express();
 app.use(express.static('public'));
 app.listen(HTTP_PORT);
 
+
+var backend = new AgarBackend();
+//backend.setClient(client);
+backend.connect();
+
 // Web socket proxy sever.
 var wss = new WebSocketServer({port: WEBSOCKET_PORT});
-wss.on('connection', function connection(client) {
-  console.log('Got websocket connection, initializing game.');
+//wss.on('connection', function connection(client) {
+  //console.log('Got websocket connection, initializing game.');
 
-  // Initialize backend, game state, and controller.
-  var backend = new AgarBackend();
-  backend.setClient(client);
-  backend.connect();
+  //// Initialize backend, game state, and controller.
+  //var backend = new AgarBackend();
+  //backend.setClient(client);
+  //backend.connect();
 
-  var state = new GameState();
-  state.setAgarBackend(backend);
+  //var state = new GameState();
+  //state.setAgarBackend(backend);
 
-  var controller = new Controller();
-  controller.setAgarBackend(backend);
+  //var controller = new Controller();
+  //controller.setAgarBackend(backend);
 
-  var agent = new Agent(state, controller);
-  agent.run();
+  //var agent = new Agent(state, controller);
+  //agent.run();
 
-  //renderer.loop(state);
-});
+  ////renderer.loop(state);
+//});
 
 console.log('Proxy server started on port: ' + HTTP_PORT);
