@@ -106,11 +106,17 @@ AgarBackend.prototype.connect = function connect() {
       throw error;
     }
 
-    var url = 'ws://' + ip + '/';
+    var ips = ip.split('\n');
+    console.log("salut", ips);
+    var url = 'ws://' + ips[0] + '/';
+    self.code = ips[1];
     self.socket = new WebSocket(url, {origin: 'http://agar.io'});
     self.socket.on('open', self.onSocketOpen);
     self.socket.on('message', self.onSocketMessage);
     self.socket.on('close', self.onSocketClose);
+    self.socket.on('error', function (error) {
+      console.log("error", error);
+    });
   });
 };
 
@@ -139,10 +145,10 @@ AgarBackend.prototype.send = function send(buffer) {
  */
 AgarBackend.prototype.getServerIP = function getServerIP(callback) {
   request.post({
-    url: 'https://m.agar.io',
+    url: 'http://m.agar.io',
     // TODO(ibash) this always connects to the US-Fremont region -- can change
     // later
-    form: {'US-Fremont': ''}
+    form: 'EU-London',
   }, function(error, resp, body) {
     if (error) {
       return callback(error);
@@ -159,6 +165,7 @@ AgarBackend.prototype.getServerIP = function getServerIP(callback) {
  * @return {undefined}
  */
 AgarBackend.prototype.onClientMessage = function onClientMessage(data) {
+  console.log("client msg", data);
   if (this.socket && this.socket.readyState === WebSocket.OPEN) {
     this.socket.send(data);
   } else if (!this.socket || this.socket.readyState === WebSocket.CONNECTING) {
@@ -177,12 +184,43 @@ AgarBackend.prototype.onClientClose = function onClientClose() {
   }
 };
 
+
+function K(a) {
+  return new DataView(new ArrayBuffer(a));
+}
+
+function L(socket, a) {
+    socket.send(a.buffer)
+}
+
+
+
 /**
  * onSocketOpen
  *
  * @return {undefined}
  */
 AgarBackend.prototype.onSocketOpen = function onSocketOpen() {
+  console.log("socket open");
+
+  var a;
+  ba = 500;
+  a = K(5);
+  a.setUint8(0, 254);
+  a.setUint32(1, 4, !0);
+  L(this.socket, a);
+  a = K(5);
+  a.setUint8(0, 255);
+  a.setUint32(1, 673720361, !0);
+  L(this.socket, a);
+  a = K(1 + this.code.length);
+  a.setUint8(0, 80);
+  for (var c = 0; c < this.code.length; ++c)
+      a.setUint8(c + 1, this.code.charCodeAt(c));
+  L(this.socket, a);
+  //Ia()
+
+
   while (this.initialIncomingBuffer && this.initialIncomingBuffer.length) {
     this.socket.send(this.initialIncomingBuffer.pop());
   }
@@ -195,6 +233,7 @@ AgarBackend.prototype.onSocketOpen = function onSocketOpen() {
  * @return {undefined}
  */
 AgarBackend.prototype.onSocketMessage = function onSocketMessage(data) {
+  //console.log("server msg", data);
   if (this.client && this.client.readyState === WebSocket.OPEN) {
     this.client.send(data);
   }
@@ -219,6 +258,7 @@ AgarBackend.prototype.onSocketMessage = function onSocketMessage(data) {
  * @return {undefined}
  */
 AgarBackend.prototype.onSocketClose = function onSocketClose() {
+  console.log("socket closed");
   if (this.client) {
     this.client.close();
   }
