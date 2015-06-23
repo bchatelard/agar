@@ -48,7 +48,7 @@ var parser = require('./parser');
 var request = require('request');
 var util = require('util');
 
-var numSocket = 2;
+var numSocket = 5;
 
 /**
  * AgarBackend
@@ -74,8 +74,7 @@ AgarBackend.prototype.getSocket = function getSocket() {
   if (!match) {
     return;
   }
-  var socket = _.first(_.filter(this.sockets, {used: false, ip: item.key}));
-  // FIXME Give random socket here, if multiple room
+  var socket = _.sample(_.filter(this.sockets, {used: false, ip: item.key}));
   if (socket) {
     socket.used = true;
     console.log("giving socket ", socket.id);
