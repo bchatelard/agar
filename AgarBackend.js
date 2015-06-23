@@ -75,6 +75,7 @@ AgarBackend.prototype.getSocket = function getSocket() {
     return;
   }
   var socket = _.first(_.filter(this.sockets, {used: false, ip: item.key}));
+  // FIXME Give random socket here, if multiple room
   if (socket) {
     socket.used = true;
     console.log("giving socket ", socket.id);
