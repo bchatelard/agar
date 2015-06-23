@@ -48,6 +48,8 @@ var parser = require('./parser');
 var request = require('request');
 var util = require('util');
 
+var numSocket = 2;
+
 /**
  * AgarBackend
  *
@@ -56,33 +58,36 @@ var util = require('util');
 function AgarBackend(client) {
   _.bindAll(this);
   events.EventEmitter.call(this);
+  this.sockets = [];
 }
 util.inherits(AgarBackend, events.EventEmitter);
 module.exports = AgarBackend;
 
-/**
- * setClient
- *
- * @param {WebSocket} client Client websocket connection. Messages from client
- *   will be sent to backend and messages from backend will be forwarded to
- *   client.
- * @param {bool} shouldPassMessages Defaults to false. Set to true to pass
- *   messages from client to the agar server. (i.e. control the game from the
- *   client).
- *
- * @return {undefined}
- */
-AgarBackend.prototype.setClient = function setClient(client, shouldPassMessages) {
-  if (this.client) {
-    throw new Error('Client already set');
-  }
 
-  this.client = client;
-  if (shouldPassMessages) {
-    this.initialIncomingBuffer = [];
-    this.client.on('message', this.onClientMessage);
+AgarBackend.prototype.getSocket = function getSocket() {
+  var sockets = _.countBy(this.sockets, 'ip')
+  var item = _.first(_.sortBy(_.map(sockets, function(v, k) {return {key: k, value: v}}), "value").reverse());
+  var match = false;
+  if (item && item.value >= numSocket)
+    match = true;
+  console.log(item);
+  if (!match) {
+    return;
   }
-  this.client.on('close', this.onClientClose);
+  var socket = _.first(_.filter(this.sockets, {used: false, ip: item.key}));
+  if (socket) {
+    socket.used = true;
+    console.log("giving socket ", socket.id);
+    socket.socket.on("error", function (){
+      console.log("releasing socket ", socket);
+      socket.used = false;
+    });
+    socket.socket.on("closed", function (){
+      console.log("releasing socket ", socket);
+      socket.used = false;
+    });
+  }
+  return socket;
 };
 
 
@@ -93,15 +98,48 @@ function AgarSocket() {
 util.inherits(AgarSocket, events.EventEmitter);
 
 
-AgarSocket.prototype.connect = function (ip, code, id) {
+AgarSocket.prototype.setClient = function (client) {
+  var socket = _.find(this.parent.sockets, {id: this.id});
+  this.client = client;
+  client.on("error", function (){
+    console.log("releasing socket ", socket);
+    socket.used = false;
+  });
+  client.on("close", function (){
+    console.log("releasing socket ", socket);
+    socket.used = false;
+  });
+}
+
+var socketId = 0;
+
+AgarSocket.prototype.connect = function (ip, code, cb) {
     var url = 'ws://' + ip + '/';
-    this.id = id;
+    var self = this;
+    var notified = false;
     this.code = code;
     this.socket = new WebSocket(url, {origin: 'http://agar.io'});
+    this.id = socketId++;
     this.socket.on('open', this.onSocketOpen);
-    this.socket.on('message', this.onSocketMessage);
-    this.socket.on('close', this.onSocketClose);
+    this.socket.on('message', function (data) {
+      if (!notified) {
+        notified = true;
+        cb(true);
+      }
+      self.onSocketMessage(data);
+    });
+    this.socket.on('close', function (data) {
+      if (!notified) {
+        notified = true;
+        cb(false);
+      }
+      self.onSocketClose(data);
+    });
     this.socket.on('error', function (error) {
+      if (!notified) {
+        notified = true;
+        cb(false);
+      }
       console.log("error", error);
     });
 }
@@ -115,23 +153,46 @@ AgarSocket.prototype.connect = function (ip, code, id) {
  * @return {undefined}
  */
 AgarBackend.prototype.connect = function connect() {
-  //if (!this.client) {
-    //throw new Error('Set client before connecting backend');
-  //}
 
   var self = this;
   this.getServerIP(function(error, ip) {
     if (error) {
-      // TODO(ibash) should probably make connect take a callback so that
-      // upstream can handle the error. But for right now... ¯\_(ツ)_/¯
       throw error;
     }
-    for (var i = 0; i < 10; i++) {
-      var ips = ip.split('\n');
-      console.log("salut", ips);
-      var socket = new AgarSocket()
-      socket.connect(ips[0], ips[1], i);
-    }
+    var ips = ip.split('\n');
+    console.log("connecting to", ips);
+    var socket = new AgarSocket()
+    socket.parent = self;
+    socket.connect(ips[0], ips[1], function (status) {
+      function reconnect() {
+        setTimeout(function () {
+          self.connect();
+        }, 7000);
+      }
+      if (status) {
+        console.log("connected");
+        // FIXME register on close to remove the socket from this list
+        self.sockets.push({socket: socket, id: socket.id, ip: ips[0], used: false});
+        console.log(self.sockets);
+
+        var sockets = _.countBy(self.sockets, 'ip');
+        console.log(sockets);
+        var item = _.first(_.sortBy(_.map(sockets, function(v, k) {return {key: k, value: v}}), "value").reverse());
+        var match = false;
+        if (item && item.value >= numSocket)
+          match = true;
+        console.log(item);
+
+        if (!match)
+          reconnect();
+        else
+          console.log("ok got", item);
+      }
+      else {
+        console.log("connection failed");
+        reconnect();
+      }
+    });
 
   });
 };
@@ -217,7 +278,7 @@ function L(socket, a) {
  * @return {undefined}
  */
 AgarBackend.prototype.onSocketOpen = function onSocketOpen() {
-  console.log("socket open");
+  console.log("server open");
 
   var a;
   ba = 500;
@@ -249,7 +310,6 @@ AgarBackend.prototype.onSocketOpen = function onSocketOpen() {
  * @return {undefined}
  */
 AgarBackend.prototype.onSocketMessage = function onSocketMessage(data) {
-  //console.log("server msg", data);
   if (this.client && this.client.readyState === WebSocket.OPEN) {
     this.client.send(data);
   }
@@ -280,13 +340,14 @@ AgarBackend.prototype.onSocketClose = function onSocketClose() {
   }
 };
 
+
 /**
  * onSocketOpen
  *
  * @return {undefined}
  */
 AgarSocket.prototype.onSocketOpen = function onSocketOpen() {
-  console.log("socket open");
+  console.log("server open");
 
   var a;
   ba = 500;
@@ -296,19 +357,20 @@ AgarSocket.prototype.onSocketOpen = function onSocketOpen() {
   L(this.socket, a);
   a = K(5);
   a.setUint8(0, 255);
-  a.setUint32(1, 673720361, !0);
+  // Why is this changing everyday ? we should also send this during the
+  // m.agar.io request
+  a.setUint32(1, 154669603, !0);
   L(this.socket, a);
   a = K(1 + this.code.length);
   a.setUint8(0, 80);
   for (var c = 0; c < this.code.length; ++c)
       a.setUint8(c + 1, this.code.charCodeAt(c));
   L(this.socket, a);
-  //Ia()
 
 
-  while (this.initialIncomingBuffer && this.initialIncomingBuffer.length) {
-    this.socket.send(this.initialIncomingBuffer.pop());
-  }
+  //while (this.initialIncomingBuffer && this.initialIncomingBuffer.length) {
+  //  this.socket.send(this.initialIncomingBuffer.pop());
+  //}
 };
 
 /**
@@ -318,22 +380,8 @@ AgarSocket.prototype.onSocketOpen = function onSocketOpen() {
  * @return {undefined}
  */
 AgarSocket.prototype.onSocketMessage = function onSocketMessage(data) {
-  console.log("server msg", this.id);
   if (this.client && this.client.readyState === WebSocket.OPEN) {
     this.client.send(data);
-  }
-
-  var message = parser.parse(data);
-  if (message.type === parser.TYPES.USER_ID) {
-    this.emit('userId', message.data.id);
-  } else if (message.type === parser.TYPES.UPDATES) {
-    this.emit('updates', message.data.consumptions, message.data.entities, message.data.destructions);
-  } else if (message.type === parser.TYPES.BOARD_SIZE) {
-    this.emit('boardSize', message.data.maxX, message.data.maxY);
-  } else if (message.type === parser.TYPES.LEADER_BOARD) {
-  } else {
-    console.log('unknown message');
-    console.log(JSON.stringify(message, null, 2));
   }
 };
 
@@ -343,8 +391,16 @@ AgarSocket.prototype.onSocketMessage = function onSocketMessage(data) {
  * @return {undefined}
  */
 AgarSocket.prototype.onSocketClose = function onSocketClose() {
-  console.log("socket closed", this.id);
-  if (this.client) {
+  console.log("server closed", this.id);
+  if (this.client && this.client.readyState === WebSocket.OPEN) {
     this.client.close();
   }
+};
+
+AgarSocket.prototype.send = function send(buffer) {
+  if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+    // TODO(ibash) should I throw an error?
+    return;
+  }
+  this.socket.send(buffer);
 };

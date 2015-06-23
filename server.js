@@ -29,8 +29,30 @@ backend.connect();
 
 // Web socket proxy sever.
 var wss = new WebSocketServer({port: WEBSOCKET_PORT});
-//wss.on('connection', function connection(client) {
-  //console.log('Got websocket connection, initializing game.');
+wss.on('connection', function connection(client) {
+  console.log('Got websocket connection, initializing game.');
+
+  var socket = backend.getSocket();
+  if (!socket) {
+    console.log("cannot get socket");
+    client.close();
+    return;
+  }
+  socket.socket.setClient(client);
+
+  console.log("ok got socket", socket.id);
+  client.on("open", function (data) {
+    console.log("client open", data)
+  });
+  client.on("message", function (data) {
+    socket.socket.send(data);
+  });
+  client.on("close", function (data) {
+    console.log("client close", data)
+  });
+  client.on("error", function (data) {
+    console.log("client error", data)
+  });
 
   //// Initialize backend, game state, and controller.
   //var backend = new AgarBackend();
@@ -47,6 +69,6 @@ var wss = new WebSocketServer({port: WEBSOCKET_PORT});
   //agent.run();
 
   ////renderer.loop(state);
-//});
+});
 
 console.log('Proxy server started on port: ' + HTTP_PORT);
